@@ -1,0 +1,75 @@
+name: Build DemoLoop IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract DemoLoop project
+        run: |
+          rm -rf working
+          unzip -q DemoLoop-iOS-IPA-ready.zip
+          test -d working
+          echo "Project extracted successfully"
+          ls -la working
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: working/package-lock.json
+
+      - name: Install dependencies
+        working-directory: working
+        run: npm ci
+
+      - name: Sync Capacitor
+        working-directory: working
+        run: npx cap sync ios
+
+      - name: Install CocoaPods
+        working-directory: working/ios/App
+        run: pod install --repo-update
+
+      - name: Build unsigned iOS app
+        working-directory: working
+        run: |
+          mkdir -p build
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Create IPA
+        working-directory: working
+        run: |
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -R \
+            build/DerivedData/Build/Products/Release-iphoneos/App.app \
+            build/Payload/
+          cd build
+          zip -qry DemoLoop-unsigned.ipa Payload
+          ls -lh DemoLoop-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DemoLoop-IPA
+          path: working/build/DemoLoop-unsigned.ipa
